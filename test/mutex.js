@@ -5,7 +5,7 @@ const Mutex = require("../lib/Mutex/index.js");
 const os = require("node:os");
 const assert = require("node:assert");
 const { Worker, workerData, isMainThread, threadId } = threads;
-const { range } = require('../util/index.js');
+const { range, spawn } = require('../util/index.js');
 const { it } = require("node:test");
 
 if (isMainThread) {
@@ -14,24 +14,7 @@ if (isMainThread) {
   const workerData = new SharedArrayBuffer(8);
   const TEST_TIME = 6e4;
   const { forEach } = Iterator.prototype;
-
-  const spawn = () => {
-    const worker = new Worker(__filename, { workerData });
-    const id = worker.threadId;
-    workers.set(id, worker);
-
-    worker.on("error", (error) => {
-      console.error(`Worker ${id} exited with: `, error);
-      workers.delete(id);
-      process.exit(1);
-    });
-
-    worker.on("exit", () => {
-      console.log(`Worker exited ${id}`);
-      workers.delete(id);
-    });
-  };
-
+  
   const finish = () => {
     forEach.call(
       workers.values(),
@@ -45,11 +28,11 @@ if (isMainThread) {
     process.exit(0);
   });
 
-  forEach.call(range(limit), spawn);
+  forEach.call(range(limit), () => spawn({ file: __filename, workerData, workers }));
 
   setTimeout(() => {
     finish();
-    console.log(`Mutex tests timeout ${TEST_TIME} [Mutex]`);
+    console.log(`tests timeout ${TEST_TIME} [Mutex]`);
   }, TEST_TIME);
 
 } else {

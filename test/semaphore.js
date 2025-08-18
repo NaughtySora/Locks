@@ -6,9 +6,9 @@ const path = require("node:path");
 const os = require("node:os");
 const assert = require('node:assert');
 const { Semaphore } = require("../lib/Semaphore/index.js");
-const { range } = require('../util/index.js');
+const { range, spawn } = require('../util/index.js');
 
-const { isMainThread, workerData, threadId, Worker } = threads;
+const { isMainThread, workerData, threadId, } = threads;
 
 const CONCURRENCY = 4;
 const DIR = path.resolve(__dirname, 'bin');
@@ -28,30 +28,14 @@ if (isMainThread) {
   new Semaphore(buffer, { concurrency: CONCURRENCY });
   const { forEach } = Iterator.prototype;
 
-  const spawn = () => {
-    const worker = new Worker(__filename, { workerData: buffer });
-    const id = worker.threadId;
-    workers.set(id, worker);
-
-    worker.on("error", (error) => {
-      console.error(`Worker ${id} exited with: `, error);
-      workers.delete(id);
-      process.exit(1);
-    });
-
-    worker.on("exit", () => {
-      console.log(`Worker exited ${id}`);
-      workers.delete(id);
-    });
-  };
-
   const finish = () => {
     forEach.call(
       workers.values(),
       worker => worker.terminate(),
     );
-    const files = fs.readdirSync(DIR);
-    files.forEach(filepath => fs.unlinkSync(path.resolve(DIR, filepath)));
+    fs.readdirSync(DIR)
+      .forEach(filepath =>
+        fs.unlinkSync(path.resolve(DIR, filepath)));
   };
 
   process.on("SIGINT", () => {
@@ -60,11 +44,14 @@ if (isMainThread) {
     process.exit(0);
   });
 
-  forEach.call(range(limit), spawn);
+  forEach.call(
+    range(limit),
+    () => spawn({ file: __filename, workerData: buffer, workers }),
+  );
 
   setTimeout(() => {
     finish();
-    console.log(`Mutex tests timeout ${TEST_TIME} [Semaphore]`);
+    console.log(`tests timeout ${TEST_TIME} [Semaphore]`);
   }, TEST_TIME);
 
 } else {
