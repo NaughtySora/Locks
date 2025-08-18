@@ -3,68 +3,88 @@
 const threads = require("node:worker_threads");
 const Mutex = require("../lib/Mutex/index.js");
 const os = require("node:os");
+const assert = require("node:assert");
 const { Worker, workerData, isMainThread, threadId } = threads;
-const { range, sequentially } = require('../util/index.js');
+const { range, spawn } = require('../util/index.js');
+const { it } = require("node:test");
 
-// tested about 2 hours couple of times;
-// to cause sync violation comment mutex in any position
+if (isMainThread) {
+  const limit = os.availableParallelism();
+  const workers = new Map();
+  const workerData = new SharedArrayBuffer(8);
+  const TEST_TIME = 6e4;
+  const { forEach } = Iterator.prototype;
+  
+  const finish = () => {
+    forEach.call(
+      workers.values(),
+      worker => worker.terminate(),
+    );
+  };
 
-if (!isMainThread) {
+  process.on("SIGINT", () => {
+    finish();
+    console.log("Graceful shutdown [Mutex]");
+    process.exit(0);
+  });
+
+  forEach.call(range(limit), () => spawn({ file: __filename, workerData, workers }));
+
+  setTimeout(() => {
+    finish();
+    console.log(`tests timeout ${TEST_TIME} [Mutex]`);
+  }, TEST_TIME);
+
+} else {
   const mutex = new Mutex(workerData);
   const array = new Uint8Array(workerData, 4);
-  const mod = threadId % 2 === 0;
-  if (mod) {
-    const timer = setTimeout(() => {
-      mutex.enter();
-      console.log("read", threadId, array);
-      sequentially(array);
-      mutex.leave();
-      timer.refresh();
-    }, 0);
+
+  if (threadId % 2 === 0) {
+    it("Mutex-read: manually", () => {
+      const timer = setTimeout(() => {
+        mutex.enter();
+        const element = array[0];
+        assert.strictEqual(array[1], element);
+        assert.strictEqual(array[2], element);
+        assert.strictEqual(array[3], element);
+        mutex.leave();
+        timer.refresh();
+      }, 0);
+    });
+
+    it("Mutex-read: Symbol.dispose", () => {
+      const timer = setTimeout(() => {
+        mutex.enter();
+        const element = array[0];
+        assert.strictEqual(array[1], element);
+        assert.strictEqual(array[2], element);
+        assert.strictEqual(array[3], element);
+        mutex[Symbol.dispose]();
+        timer.refresh();
+      }, 0);
+    });
+
+    it("Mutex-read: using Node >= 24", () => {
+      const test = (count = 0) => {
+        if (count >= 100000) return;
+        using m = mutex;
+        m.enter();
+        const element = array[0];
+        assert.strictEqual(array[1], element);
+        assert.strictEqual(array[2], element);
+        assert.strictEqual(array[3], element);
+        process.nextTick(test, ++count);
+      };
+      test();
+    });
   } else {
     let value = 1;
     const timer = setTimeout(() => {
       mutex.enter();
       for (let i = 0; i < 4; i++) array[i] += value;
       mutex.leave();
-      timer.refresh();
       value = -value;
+      timer.refresh();
     }, 0);
   }
 }
-
-module.exports = () => {
-  if (isMainThread) {
-    const limit = os.availableParallelism();
-    const workers = new Map();
-    const buffer = new SharedArrayBuffer(8);
-
-    const spawn = () => {
-      const worker = new Worker(__filename, { workerData: buffer });
-      const id = worker.threadId;
-      workers.set(id, worker);
-
-      worker.on("error", (error) => {
-        console.error(`Worker Error: `, error);
-        console.log(`Worker ${id} terminated`);
-        workers.delete(id);
-        process.exit(1);
-      });
-
-      worker.on("exit", () => {
-        console.log(`Worker exit ${id}`);
-        workers.delete(id);
-      });
-    };
-
-    process.on("SIGINT", () => {
-      Iterator.prototype.forEach.call(
-        workers.values(),
-        (worker) => worker.terminate()
-      );
-      process.exit(0);
-    });
-
-    Iterator.prototype.forEach.call(range(limit), spawn);
-  }
-};

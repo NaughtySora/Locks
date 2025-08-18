@@ -1,10 +1,10 @@
 {
   "name": "naughty-locks",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "NaughtySora <naughtysora@proton.me>",
   "license": "MIT",
   "description": "Nodejs concurrency primitives",
-  "main": "main.js",
+  "exports": "./main.js",
   "types": "main.d.ts",
   "readmeFilename": "README.md",
   "keywords": [

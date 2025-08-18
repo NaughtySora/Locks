@@ -1,78 +1,86 @@
 "use strict";
 
+const fs = require('node:fs');
 const threads = require('node:worker_threads');
-const { ExclusiveSemaphore } = require("../lib/Semaphore/index.js");
-const os = require('node:os');
-const { range, sequentially } = require('../util/index.js');
-const { Worker, isMainThread, threadId, workerData } = threads;
+const path = require("node:path");
+const os = require("node:os");
+const assert = require('node:assert');
+const { Semaphore } = require("../lib/Semaphore/index.js");
+const { range, spawn } = require('../util/index.js');
 
-if (!isMainThread) {
-  const semaphore = new ExclusiveSemaphore(workerData);
-  const array = new Uint8Array(workerData, 8);
-  const read = threadId % 2 === 0;
-  if (read) {
-    const timer = setTimeout(() => {
-      semaphore.enter();
-      sequentially(array);
-      // console.log(workerData)
-      semaphore.leave();
-      timer.refresh();
-    });
-  } else {
-    let value = 1;
-    const timer = setTimeout(() => {
-      
-      semaphore.exclusive();
-      for (let i = 0; i < 4; i++) array[i] += value;
-      semaphore.leaveExclusive();
+const { isMainThread, workerData, threadId, } = threads;
 
-      //! Error
-      // semaphore.enter();
-      // for (let i = 0; i < 4; i++) array[i] += value;
-      //  semaphore.leave();
+const CONCURRENCY = 4;
+const DIR = path.resolve(__dirname, 'bin');
 
-      //! Error
-      // for (let i = 0; i < 4; i++) array[i] += value;
-
-      timer.refresh();
-      value = -value;
-    });
-  }
-}
-
-module.exports = () => {
-  if (isMainThread) {
-    const limit = os.availableParallelism();
-    const workers = new Map();
-    const buffer = new SharedArrayBuffer(12);
-    new ExclusiveSemaphore(buffer, { concurrency: limit });
-
-    const spawn = () => {
-      const worker = new Worker(__filename, { workerData: buffer });
-      const id = worker.threadId;
-      workers.set(id, worker);
-
-      worker.on("error", (error) => {
-        console.error(`Worker Error: `, error);
-        console.log(`Worker ${id} terminated`);
-        workers.delete(id);
-        process.exit(1);
-      });
-
-      worker.on("exit", () => {
-        console.log(`Worker exit ${id}`);
-        workers.delete(id);
-      });
-    };
-
-    process.on("SIGINT", () => {
-      Iterator.prototype.forEach.call(
-        workers.values(),
-        (worker) => void worker.terminate()
-      );
-      process.exit(0);
-    });
-
-    Iterator.prototype.forEach.call(range(limit), spawn);
-  }
+const readDir = (dir, cb) => {
+  fs.readdir(dir, (err, data) => {
+    if (err) throw new Error(`Can't read dir ${dir}`);
+    cb(data);
+  });
 };
+
+if (isMainThread) {
+  const workers = new Map();
+  const limit = os.availableParallelism();
+  const buffer = new SharedArrayBuffer(4);
+  const TEST_TIME = 6e4;
+  new Semaphore(buffer, { concurrency: CONCURRENCY });
+  const { forEach } = Iterator.prototype;
+
+  const finish = () => {
+    forEach.call(
+      workers.values(),
+      worker => worker.terminate(),
+    );
+    fs.readdirSync(DIR)
+      .forEach(filepath =>
+        fs.unlinkSync(path.resolve(DIR, filepath)));
+  };
+
+  process.on("SIGINT", () => {
+    finish();
+    console.log("Graceful shutdown [Semaphore]");
+    process.exit(0);
+  });
+
+  forEach.call(
+    range(limit),
+    () => spawn({ file: __filename, workerData: buffer, workers }),
+  );
+
+  setTimeout(() => {
+    finish();
+    console.log(`tests timeout ${TEST_TIME} [Semaphore]`);
+  }, TEST_TIME);
+
+} else {
+  const semaphore = new Semaphore(workerData);
+  const REPEAT_COUNT = 1e6;
+  const file = path.resolve(DIR, `file-${threadId}.dat`);
+  const data = `Data from ${threadId} `.repeat(REPEAT_COUNT);
+
+  const compareDirLength = () => void readDir(DIR,
+    dir => void assert.ok(dir.length <= CONCURRENCY));
+
+  const timer = setTimeout(() => {
+    compareDirLength();
+    semaphore.enter();
+    compareDirLength();
+    fs.writeFile(file, data, () => {
+      compareDirLength();
+      setTimeout(() => {
+        compareDirLength();
+        fs.unlink(file, () => {
+          compareDirLength();
+          semaphore.leave();
+          compareDirLength();
+          timer.refresh();
+        });
+        compareDirLength();
+      }, 0);
+      compareDirLength();
+    });
+    compareDirLength();
+  }, 0);
+}

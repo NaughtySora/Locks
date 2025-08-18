@@ -32,3 +32,28 @@
 `  exclusive(): void;`\
 `  leaveExclusive(): void;`\
 `}`
+
+
+## Examples
+- limit file access concurrency with Semaphore
+```js
+  // Root
+  const workersCount = 10;
+  const buffer = new SharedArrayBuffer(4);
+  // initialization Semaphore in Root, concurrency says how many threads can work at the same time
+  new Semaphore(buffer, { concurrency: 4 });
+  spawn({workersCount, workerData: buffer});
+
+  // Worker
+  const semaphore = new Semaphore(workerData); // each worker has semaphore with shared buffer from root
+
+  const writeToFile = (filepath, content) => {
+    semaphore.enter(); // enter into critical section
+    fs.writeFile(filepath, content, (err, data) => {
+      /** --- working with errors and data --- */
+      semaphore.leave(); // leave critical section
+    });
+  };
+
+  writeToFile(`./test-${threadId}.js`, 'hello');
+```
