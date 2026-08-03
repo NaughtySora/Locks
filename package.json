@@ -34,7 +34,7 @@
     "email": "naughtysora@proton.me"
   },
   "devDependencies": {
-    "@types/node": "^22.10.5",
-    "typescript": "^5.7.2"
+    "@types/node": "^26.1.2",
+    "typescript": "^7.0.2"
   }
 }

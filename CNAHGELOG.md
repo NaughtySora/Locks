@@ -15,3 +15,9 @@
 - Symbol dispose
 - better tests
 - examples
+
+## [0.2.1] - 2026-08-03
+
+- fix bug atomic read, remove offset from load index
+- update types
+- update deps
